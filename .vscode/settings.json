@@ -1,0 +1,11 @@
+{
+  "files.associations": {
+  "*.luau": "lua",
+  "*.client.luau": "lua",
+  "*.server.luau": "lua"
+  },
+  "Lua.workspace.library": [
+    "./node_modules/roblox-ts/typings"
+  ],
+  "Lua.diagnostics.globals": ["game", "script", "workspace", "ReplicatedStorage"]
+}
