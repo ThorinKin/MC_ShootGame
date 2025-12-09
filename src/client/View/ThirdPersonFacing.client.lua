@@ -1,11 +1,11 @@
--- StarterPlayer/StarterPlayerScripts/Client/ThirdPersonFacing.client.lua
+-- StarterPlayer/StarterPlayerScripts/Client/View/ThirdPersonFacing.client.lua
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local PlayerViewState = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("PlayerViewState"))
-local ThirdPersonShooter = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ThirdPersonShooter"))
+local PlayerViewState = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ViewControl"):WaitForChild("PlayerViewState"))
+local ThirdPersonShooter = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ViewControl"):WaitForChild("ThirdPersonShooter"))
 
 local localPlayer = Players.LocalPlayer
 
@@ -103,7 +103,7 @@ RunService:BindToRenderStep("TP_MouseFacing", Enum.RenderPriority.Character.Valu
 	local alpha = math.clamp(dt * ROTATE_SPEED, 0, 1)
 	local blended = (currentDir * (1 - alpha) + desiredDir * alpha).Unit
 
-	-- 用 lookAt 保证只转 Y 轴（因为我们已经把 Y 分量归零了）
+	-- 用 lookAt 保证只转 Y 轴
 	local newCF = CFrame.lookAt(rootPos, rootPos + blended)
 	hrp.CFrame = newCF
 end)

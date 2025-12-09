@@ -1,10 +1,10 @@
--- StarterPlayer/StarterPlayerScripts/Client/ViewModeController.client.lua
+-- StarterPlayer/StarterPlayerScripts/Client/View/ViewModeController.client.lua
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local PlayerViewState = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("PlayerViewState"))
+local PlayerViewState = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ViewControl"):WaitForChild("PlayerViewState"))
 
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
@@ -19,9 +19,9 @@ local ViewMode = {
 local currentMode = ViewMode.FirstPerson
 
 -- 第三人称参数
-local THIRD_PERSON_DEFAULT_DIST = 10   -- 默认第三人称距离
+local THIRD_PERSON_DEFAULT_DIST = 6   -- 默认第三人称距离
 local THIRD_PERSON_MIN_DIST = 6       -- 最靠近的第三人称距离
-local THIRD_PERSON_MAX_DIST = 22      -- 最远的第三人称距离
+local THIRD_PERSON_MAX_DIST = 6.3      -- 最远的第三人称距离
 local THIRD_PERSON_HEIGHT_OFFSET = 2  -- 相机比 HRP 高一点
 local TRANSITION_TIME = 0.25          -- 切换时长
 
