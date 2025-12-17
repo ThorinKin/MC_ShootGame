@@ -15,8 +15,8 @@ local popupTemplate = effectsFolder:WaitForChild("DamagePopUp") :: BasePart
 local BASE_HEIGHT_OFFSET = 1.2     -- 再往上抬多少 studs
 local RANDOM_OFFSET_XZ   = 2.1     -- 平面随机偏移范围（越大越分散）
 local FLOAT_UP_DISTANCE  = 2.1     -- 往上飘多高
-local POPUP_DURATION     = 0.45    -- tween 时长
-local POPUP_LIFETIME     = 0.7     -- 总存在时间，比 POPUP_DURATION 大点
+local POPUP_DURATION     = 1.5     -- tween 时长
+local POPUP_LIFETIME     = 1.9     -- 总存在时间，比 POPUP_DURATION 大点
 
 -- 尺寸相关参数：
 local BASE_SCALE         = 1.0     -- 基础缩放

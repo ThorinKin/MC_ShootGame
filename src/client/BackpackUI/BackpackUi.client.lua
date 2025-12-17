@@ -6,6 +6,11 @@ local TweenService      = game:GetService("TweenService")
 local localPlayer = Players.LocalPlayer
 local playerGui   = localPlayer:WaitForChild("PlayerGui")
 local TweenSpring = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Effects"):WaitForChild("Tween")) -- Tween弹簧模块
+-- 3D 背景舞台控制器
+local BackpackBgSceneController = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Backpack"):WaitForChild("BackpackBgSceneController"))
+-- 1206：背包打开时临时 射击/投掷物开启全局锁
+local GameplayLock = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ViewControl"):WaitForChild("DisableEnableLock"))
+local UIController = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Effects"):WaitForChild("UIController"))
 
 -- UI 实例路径
 local BackpackMainFrame = playerGui:WaitForChild("Main"):WaitForChild("Backpack") -- 主 Frame
@@ -15,6 +20,12 @@ local slotButton_Helmet    = BackpackSlotsFrame:WaitForChild("Helmet")
 local slotButton_Armor     = BackpackSlotsFrame:WaitForChild("Armor")
 local slotButton_Weapon    = BackpackSlotsFrame:WaitForChild("Weapon")
 local slotButton_Throwable = BackpackSlotsFrame:WaitForChild("Throwable")
+-- 技能栏：Skill1 映射投掷物
+local HUDGui       = playerGui:WaitForChild("HUD")
+local HUD_Bottom   = HUDGui:WaitForChild("Bottom")
+local HUD_Frame   = HUD_Bottom:WaitForChild("StatusBar")
+local HUD_Player   = HUD_Frame:WaitForChild("Player")
+local Skill1Button = HUD_Player:WaitForChild("Skill1")
 -- 物品栏
 local InventoryFrame         = BackpackMainFrame:WaitForChild("Inventory")
 local itemTemplatesFolder    = InventoryFrame:WaitForChild("UITemplates")
@@ -29,6 +40,26 @@ local ThrowablePropsFrame = BackpackMainFrame:WaitForChild("ThrowableProperties"
 WeaponPropsFrame.Visible    = false
 ArmorPropsFrame.Visible     = false
 ThrowablePropsFrame.Visible = false
+-------------------------------------------------------------------------
+-- 背包开关驱动 3D 舞台
+local backpackSceneActive = false
+local sceneOpenDelay = 0.06 -- 稍微等 HUD 开始缩回时间
+-------------------------------------------------------------------------
+-- 工具：死亡态判断（死亡但未重生时，禁止开背包）
+local function isLocalDeadNow(): boolean
+	local char = localPlayer.Character
+	if not char then return true end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if not hum then return true end
+	if hum.Health <= 0 then return true end
+	local ok, state = pcall(function()
+		return hum:GetState()
+	end)
+	if ok and state == Enum.HumanoidStateType.Dead then
+		return true
+	end
+	return false
+end
 -- 槽位名与服务器内部映射（服务器用 helmet/armor/weapon/throwable）
 local SLOT_UI_MAP = {
     helmet    = slotButton_Helmet,
@@ -117,7 +148,6 @@ local TYPE_DISPLAY_NAME = {
     throwable = "Throwable",
 }
 
-
 -- 本地状态缓存
 -- 当前背包：来自服务器 snapshot.backpack，不在这里改，只当字典用
 local currentBackpackState = {}   -- [itemId] = itemTable
@@ -126,10 +156,90 @@ local currentEquippedState = {}   -- [slotName] = itemId|nil
 -- 当前 UI 实例缓存：方便查到具体格子/图标
 local itemSlotFrames      = {}    -- [itemId]   = Frame （在 ScrollingFrame 下）
 local equippedSlotFrames  = {}    -- [slotName] = Frame （在槽位按钮下）
+-- 技能槽 UI：Skill1 下的投掷物图标
+local skill1ThrowableIconFrame = nil
 -- 最近一次点击槽位按钮卸下的槽位，用来决定是否做渐隐动画
 local lastClickedSlotForFade = nil  -- string|nil
 -- 当前高亮的物品（仅一个）
 local currentHighlightedItemId = nil -- string|nil
+
+-- 射击/投掷物全局锁：角色可能死亡/重生：用弱表按 character 记 token，避免旧角色残留/报错
+local gameplayLockTokens = setmetatable({}, { __mode = "k" }) -- [Model] = token
+local function lockGameplayForCharacter(char: Model?)
+    if not (char and char.Parent) then
+        return
+    end
+    if gameplayLockTokens[char] then
+        return
+    end
+    gameplayLockTokens[char] = GameplayLock.acquire(char, "BackpackUI")
+end
+local function unlockGameplayForAll()
+    for char, tok in pairs(gameplayLockTokens) do
+        if char and char.Parent and tok then
+            GameplayLock.release(char, tok)
+        end
+        gameplayLockTokens[char] = nil
+    end
+end
+-- 玩家重生：如果背包还开着，给新角色补锁
+localPlayer.CharacterAdded:Connect(function(char: Model)
+    if BackpackMainFrame and BackpackMainFrame.Parent and BackpackMainFrame.Visible then
+        lockGameplayForCharacter(char)
+    end
+end)
+
+-- 工具：背包背景舞台
+local function onBackpackVisibleChanged()
+    if not BackpackMainFrame or not BackpackMainFrame.Parent then
+        return
+    end
+    local nowVisible = BackpackMainFrame.Visible == true
+    -- 打开
+    if nowVisible and not backpackSceneActive then
+        -- 死亡态禁止开背包
+        if isLocalDeadNow() then
+            pcall(function()
+                UIController.closeScreen("Backpack")
+            end)
+            return
+        end
+        backpackSceneActive = true
+        -- 关键：先上锁（别等 sceneOpenDelay），先把射击/投掷物系统按住
+        lockGameplayForCharacter(localPlayer.Character)
+        task.delay(sceneOpenDelay, function()
+            if backpackSceneActive and BackpackMainFrame
+                and BackpackMainFrame.Parent
+                and BackpackMainFrame.Visible
+            then
+                BackpackBgSceneController.enter()
+            end
+        end)
+        return
+    end
+    -- 关闭
+    if (not nowVisible) and backpackSceneActive then
+        backpackSceneActive = false
+        -- 解锁全局锁
+        BackpackBgSceneController.exit(false, function()
+            unlockGameplayForAll()
+        end)
+        return
+    end
+end
+-- 监听 Visible 变化
+BackpackMainFrame:GetPropertyChangedSignal("Visible"):Connect(onBackpackVisibleChanged)
+-- 兜底：如果背包 UI 被销毁/移走（重生重建 Main 等），直接瞬间恢复相机
+BackpackMainFrame.AncestryChanged:Connect(function(_, parent)
+    if not parent and backpackSceneActive then
+        backpackSceneActive = false
+        BackpackBgSceneController.exit(true) -- instant：不闪屏，直接恢复
+        unlockGameplayForAll()
+    end
+end)
+
+-- 初始化时同步一次
+onBackpackVisibleChanged()
 
 -- 高亮属性栏工具几个：从一个物品槽 Frame 里找到 highlight 节点
 local function getHighlightGui(slotFrame: Instance?)
@@ -235,6 +345,7 @@ local function setHighlightedItem(itemId: string?)
 
     if not itemId then
         showPropertiesForItem(nil)
+        BackpackBgSceneController.setEquipPreview(nil, false) -- 1217：没有高亮就清掉舞台展示
         return
     end
 
@@ -245,6 +356,13 @@ local function setHighlightedItem(itemId: string?)
     end
     local item = currentBackpackState[itemId]
     showPropertiesForItem(item)
+    -- 1217新：舞台展示当前高亮物品
+    if typeof(item) == "table" then
+        BackpackBgSceneController.setEquipPreview(tostring(item.subType or ""), true)
+    else
+        BackpackBgSceneController.setEquipPreview(nil, false)
+    end
+
 end
 -- 工具：默认高亮第一个/高亮物品被装备移除时兜底
 local function pickAnyInventoryItemId()
@@ -256,6 +374,66 @@ local function pickAnyInventoryItemId()
     return nil
 end
 
+-- 技能槽 UI：清理 Skill1 里的投掷物图标
+local function clearSkill1UI()
+    if skill1ThrowableIconFrame and skill1ThrowableIconFrame.Parent then
+        skill1ThrowableIconFrame:Destroy()
+    end
+    skill1ThrowableIconFrame = nil
+
+    if Skill1Button then
+        -- 给其他系统一点可用的状态标记
+        Skill1Button:SetAttribute("ThrowableItemId", "")
+        Skill1Button:SetAttribute("HasThrowable", false)
+    end
+end
+-- 技能槽 UI：根据当前已装备状态刷新 Skill1 图标
+local function refreshSkill1FromEquipped()
+    if not Skill1Button then
+        return
+    end
+    -- 先清掉旧的
+    clearSkill1UI()
+    -- 只关心投掷物槽位
+    local throwableId = currentEquippedState["throwable"]
+    if not throwableId or throwableId == "" then
+        return
+    end
+    local item = currentBackpackState[throwableId]
+    if typeof(item) ~= "table" then
+        return
+    end
+    -- Skill1 里也挂一份 Equiped 模板
+    local iconFrame = equippedTemplate:Clone()
+    iconFrame.Name = tostring(throwableId)
+    iconFrame.Visible = true
+    iconFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+    iconFrame.Position = UDim2.fromScale(0.5, 0.5)
+    iconFrame.Size = UDim2.fromScale(1, 1)
+    iconFrame.Parent = Skill1Button
+    -- 根据品质给 Icon 上色
+    local style = getItemQualityStyle(item)
+    local iconImage = iconFrame:FindFirstChild("Icon", true)
+    if iconImage and iconImage:IsA("GuiObject") then
+        iconImage.BackgroundColor3 = style.color
+    end
+    -- Skill1 里这份模板只是提示，不允许点里面的按钮
+    for _, descendant in ipairs(iconFrame:GetDescendants()) do
+        if descendant:IsA("ImageButton") then
+            descendant.AutoButtonColor = false
+            pcall(function()
+                (descendant :: any).Active = false
+            end)
+            pcall(function()
+                (descendant :: any).Interactable = false
+            end)
+        end
+    end
+    skill1ThrowableIconFrame = iconFrame
+    -- 给其他系统一个可读的标记
+    Skill1Button:SetAttribute("ThrowableItemId", throwableId)
+    Skill1Button:SetAttribute("HasThrowable", true)
+end
 -- 工具：背包 UI / 已装备 UI 清理
 local function clearBackpackUI()
     -- 清掉高亮状态 + 属性栏
@@ -270,7 +448,6 @@ local function clearBackpackUI()
         itemSlotFrames[itemId] = nil
     end
 end
-
 local function clearEquippedUI()
     for slotName, frame in pairs(equippedSlotFrames) do
         if frame and frame.Parent then
@@ -278,6 +455,8 @@ local function clearEquippedUI()
         end
         equippedSlotFrames[slotName] = nil
     end
+    -- 已装备清空时顺带清掉 Skill1 的提示
+    clearSkill1UI()
 end
 
 -- 工具：播放一个从 A 飞到 B 的 UI 动画
@@ -505,6 +684,8 @@ end
 
 -- 渲染：用一份 snapshot 渲染全部 UI（全量刷新用）
 local function renderFromSnapshot(snapshot)
+    -- 调试日志
+    -- print("[BackpackUi] renderFromSnapshot, BackpackMainFrame =", BackpackMainFrame, "parent =", BackpackMainFrame and BackpackMainFrame.Parent)
     clearBackpackUI()
     clearEquippedUI()
 
@@ -536,21 +717,20 @@ local function renderFromSnapshot(snapshot)
             equippedIdSet[id] = true
         end
     end
-
     -- 已装备 UI
     for slotName, id in pairs(currentEquippedState) do
         if id and currentBackpackState[id] then
             createEquippedIcon(slotName, id, currentBackpackState[id])
         end
     end
-
     -- 背包 UI：只显示没被装备的物品
     for id, item in pairs(currentBackpackState) do
         if not equippedIdSet[id] then
             createInventorySlot(id, item)
         end
     end
-
+    -- Skill1：根据当前投掷物装备情况刷新一次技能提示
+    refreshSkill1FromEquipped()
     -- 默认高亮物品栏第一个物品（如果有）
     local firstItemId = pickAnyInventoryItemId()
     setHighlightedItem(firstItemId)
@@ -655,11 +835,15 @@ RE_S2C_Equipped.OnClientEvent:Connect(function(slotName, slotIndex, newId, oldId
         -- 没有 newId，说明槽位被清空（纯卸下）
         local icon = equippedSlotFrames[slotName]
         if icon then
-            -- 这里理论上 oldId 分支已经处理过大部分情况了；谨慎起见保留兜底
+            -- 这里理论上 oldId 分支已经处理过大部分情况了 兜底
             playFlyAnimation(icon, BackpackScrollingFrame, nil, shouldFade)
             icon:Destroy()
             equippedSlotFrames[slotName] = nil
         end
+    end
+    -- 如果是投掷物槽位变化，刷新 Skill1 上的投掷物提示
+    if slotName == "throwable" then
+        refreshSkill1FromEquipped()
     end
 end)
 
@@ -686,19 +870,71 @@ for slotName, btn in pairs(SLOT_UI_MAP) do
     -- 槽位悬浮：如果有已装备的物品，展示它的属性
     btn.MouseEnter:Connect(function()
         local equippedId = currentEquippedState[slotName]
-        if equippedId and currentBackpackState[equippedId] then
-            showPropertiesForItem(currentBackpackState[equippedId])
+        local item = equippedId and currentBackpackState[equippedId] or nil
+        if item then
+            showPropertiesForItem(item)
+            -- 1217：悬浮槽位时也预览该装备
+            BackpackBgSceneController.setEquipPreview(tostring(item.subType or ""), false)
         end
     end)
     -- 槽位移出：恢复到当前背包高亮物品的属性（如果有），否则清空
     btn.MouseLeave:Connect(function()
-        if currentHighlightedItemId and currentBackpackState[currentHighlightedItemId] then
-            showPropertiesForItem(currentBackpackState[currentHighlightedItemId])
+        local item = currentHighlightedItemId and currentBackpackState[currentHighlightedItemId] or nil
+        if item then
+            showPropertiesForItem(item)
+            BackpackBgSceneController.setEquipPreview(tostring(item.subType or ""), false) -- 这里不必每次都弹一下
         else
             showPropertiesForItem(nil)
+            BackpackBgSceneController.setEquipPreview(nil, false)
         end
     end)
 end
-
 -- 开局：向服务器请求一次全量背包数据，避免错过首次 onChanged
 RE_CS_Request:FireServer()
+
+-- 调试日志
+-- BackpackMainFrame.AncestryChanged:Connect(function(child, parent)
+--     print("[BackpackUi] BackpackMainFrame.AncestryChanged, newParent =", parent)
+-- end)
+
+-- 玩家角色生命周期监听，死亡时刷新背包
+-- 记录 Humanoid.Died 的连接，防止挂一堆
+local humanoidDiedConn: RBXScriptConnection? = nil
+-- 工具：玩家死亡时回调
+local function onLocalHumanoidDied()
+	-- 死了就向服务器要一份最新快照
+	RE_CS_Request:FireServer()
+	-- 1207：死亡强制关背包，防止舞台/射击相机跨旧角色状态打架
+	pcall(function()
+		UIController.closeScreen("Backpack")
+	end)
+end
+-- 工具：绑定当前角色的 Humanoid.Died
+local function hookCharacter(char: Model)
+    -- 先把旧角色的监听断掉
+    if humanoidDiedConn then
+        humanoidDiedConn:Disconnect()
+        humanoidDiedConn = nil
+    end
+    -- 角色里找 Humanoid
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        humanoidDiedConn = hum.Died:Connect(onLocalHumanoidDied)
+    else
+        -- 极端情况：Humanoid 还没挂上来，等 ChildAdded 一次
+        char.ChildAdded:Connect(function(child)
+            if humanoidDiedConn then
+                return
+            end
+            if child:IsA("Humanoid") then
+                humanoidDiedConn = child.Died:Connect(onLocalHumanoidDied)
+            end
+        end)
+    end
+end
+-- 玩家当前角色
+if localPlayer.Character then
+    hookCharacter(localPlayer.Character)
+end
+-- 后续重生也要重新挂一次
+localPlayer.CharacterAdded:Connect(hookCharacter)

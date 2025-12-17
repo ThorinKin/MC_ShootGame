@@ -9,16 +9,19 @@ local SCREEN_CHILD_MODE_ATTR = "SlideChildrenOnly" -- 挂在 Screen 上，表示
 local CLOSE         = UDim2.new(0.5, 0, 1.5, 0)   -- 屏幕下方作为收起UI的位置
 -- 模糊参数（淡入淡出）
 local BLUR_SIZE     = 15
-
 -- 1205：弹簧参数（UI开关）——略慢一点 + 略带回弹
 local SPRING_DAMPING_UI_OPEN   = 0.69              -- < 1：有一点点回弹
 local SPRING_FREQ_UI_OPEN      = 2.3              -- 频率越低动画越长，大概 0.3s 左右
 local SPRING_DAMPING_UI_CLOSE  = 0.85             -- 关闭稍粘稠
 local SPRING_FREQ_UI_CLOSE     = 2.6              -- 关比开快一丢
-
 -- 1205：弹簧参数（模糊），不需要回弹，走稳重路线
 local SPRING_DAMPING_BLUR      = 1.2              -- > 1：过阻尼，没有回弹
 local SPRING_FREQ_BLUR         = 1.8              -- 模糊慢一点，更像开镜头
+-- 1217：可指定某些窗口不启用全局模糊
+local NO_BLUR_ATTR = "NoBlur" -- 指定Main下的Frame这个属性，为真时不模糊
+local DEFAULT_NO_BLUR_SCREENS = { -- 硬编码指定
+	Backpack = true,
+}
 ---------------------------------------------------------------------------------------
 
 local Players      = game:GetService("Players")
@@ -46,6 +49,8 @@ blur.Enabled = false
 
 -- 活动中的窗口集合
 local activeScreens = {} 
+-- 正在关闭的窗口集合
+local closingScreens = {}
 local function activeCount()
 	local n = 0
 	for frame in pairs(activeScreens) do
@@ -61,6 +66,21 @@ end
 local hideHud = {}            
 local originPosition = {}     -- 记录 Main 下各 Frame 的初始位置
 
+-- 工具：死亡态判断（死亡但未重生时，禁止打开，避免冲突）
+local function isLocalPlayerDead(): boolean
+	local char = player.Character
+	if not char then return true end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if not hum then return true end
+	if hum.Health <= 0 then return true end
+	local ok, state = pcall(function()
+		return hum:GetState()
+	end)
+	if ok and state == Enum.HumanoidStateType.Dead then
+		return true
+	end
+	return false
+end
 -- 工具：判断入参是否 frame
 local function isFrame(obj) return obj and obj:IsA("GuiObject") end
 -- 工具：更高级的，统一 Tween 到 Position / 用 Position 做弹簧
@@ -92,6 +112,34 @@ local function springBlur(enable: boolean)
         blur.Enabled = true
     end
 end
+-- 工具：该窗口是否需要背景模糊
+local function screenWantsBlur(frame: GuiObject): boolean
+	-- 属性优先：手动标记 NoBlur
+	if frame:GetAttribute(NO_BLUR_ATTR) == true then
+		return false
+	end
+	-- 代码默认：某些窗口名禁用 blur
+	if DEFAULT_NO_BLUR_SCREENS[frame.Name] then
+		return false
+	end
+	return true
+end
+-- 工具：按当前 activeScreens 刷新模糊开关
+local function refreshBlurState()
+	local needBlur = false
+	for frame in pairs(activeScreens) do
+		if frame and frame.Parent then
+			if (not closingScreens[frame]) and screenWantsBlur(frame) then
+				needBlur = true
+				break
+			end
+		else
+			activeScreens[frame] = nil
+			closingScreens[frame] = nil
+		end
+	end
+	springBlur(needBlur)
+end
 -- 工具：HUD 显示/隐藏（依赖 HUD 节点的 ShowPos/HidePos 属性）
 function UIController.ShowHud(show: boolean)
 	for _, frame in pairs(hideHud) do
@@ -119,7 +167,7 @@ function UIController.closeAll(exclude: string?)
 	if not exclude then
 		task.defer(function()
 			if activeCount() == 0 then
-				springBlur(false)
+				refreshBlurState()
 				UIController.ShowHud(true)
 				if SoundPlayer and SoundPlayer.playSound then
 					SoundPlayer.playSound("Close")
@@ -192,6 +240,13 @@ end
 -- 入参2： 是否忽略“先关其它窗口”（默认 false 会关闭其他窗口）
 -- 入参3： 打开动画结束后的回调
 function UIController.openScreen(screenName: string, ignoreClose: boolean?, onOpened: (() -> any)?)
+	-- 死亡禁止打开（避免极端情况死亡未重生时开）
+	if screenName == "Backpack" and isLocalPlayerDead() then
+		if SoundPlayer and SoundPlayer.playSound then
+			SoundPlayer.playSound("Close")
+		end
+		return
+	end
 	local frame = MainGui:FindFirstChild(screenName)
 	if not isFrame(frame) then
 		return
@@ -215,13 +270,16 @@ function UIController.openScreen(screenName: string, ignoreClose: boolean?, onOp
 	if not MainGui.Enabled then
 		MainGui.Enabled = true
 	end
-	local wasZero = (activeCount() == 0)
-	frame.Visible = true
+	-- 打开的是不要 blur 的窗口
+	local openWantsBlur = screenWantsBlur(frame)
+	if (not ignoreClose) and (not openWantsBlur) then
+		springBlur(false)
+	end
+	frame.Visible = true 
 	activeScreens[frame] = true
 	UIController.ShowHud(false)
-	if wasZero then
-		springBlur(true)
-	end
+	-- 统一刷新 blur
+	refreshBlurState()
 	-- 新多窗口功能：只动子 Panel 的模式
 	local childrenOnly = frame:GetAttribute(SCREEN_CHILD_MODE_ATTR) == true
 	if childrenOnly then
@@ -254,18 +312,21 @@ end
 function UIController.closeScreen(screenName: string, isAll: boolean?, onClosed: (() -> any)?)
 	local frame = MainGui:FindFirstChild(screenName)
 	if not isFrame(frame) then return end
+	-- 开始关闭就标记 closing（影响 blur），但 active 要等动画结束再移除
+	closingScreens[frame] = true
+	refreshBlurState()
 	local childrenOnly = frame:GetAttribute(SCREEN_CHILD_MODE_ATTR) == true
 	if childrenOnly then
-		-- 多窗口动效
 		task.spawn(function()
 			animateScreenChildren(frame, false, function()
-				-- 子 Panel 全部收回后，再关 Screen 自己
 				if frame and frame.Parent then
 					frame.Visible = false
+					activeScreens[frame] = nil
+					closingScreens[frame] = nil
+					refreshBlurState()
 				end
-				activeScreens[frame] = nil
+				-- 1217：HUD/Close 声音仍然只在真正没窗口了才回
 				if not isAll and activeCount() == 0 then
-					springBlur(false)
 					UIController.ShowHud(true)
 					if SoundPlayer and SoundPlayer.playSound then
 						SoundPlayer.playSound("Close")
@@ -276,15 +337,16 @@ function UIController.closeScreen(screenName: string, isAll: boolean?, onClosed:
 				end
 			end)
 		end)
-	else -- 整块 Screen 自己动
+	else
 		local hidePos = frame:GetAttribute("HidePos")
 		if typeof(hidePos) ~= "UDim2" then hidePos = CLOSE end
 		task.spawn(function()
 			springTo(frame, hidePos, SPRING_DAMPING_UI_CLOSE, SPRING_FREQ_UI_CLOSE, function()
 				frame.Visible = false
 				activeScreens[frame] = nil
+				closingScreens[frame] = nil
+				refreshBlurState()
 				if not isAll and activeCount() == 0 then
-					springBlur(false)
 					UIController.ShowHud(true)
 					if SoundPlayer and SoundPlayer.playSound then
 						SoundPlayer.playSound("Close")
@@ -365,6 +427,7 @@ function UIController.setup()
 		originPosition[obj] = nil
 		posTweens[obj] = nil
 		activeScreens[obj] = nil
+		closingScreens[obj] = nil
 	end)
 	-- HUD 收集
 	local hudRoot = playerGui:FindFirstChild("HUD")

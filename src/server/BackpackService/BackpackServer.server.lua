@@ -14,6 +14,7 @@ local function dprint(fmt, ...)
 end
 
 local BackpackModule = require(ServerScriptService.Server.BackpackService.BackpackModule)
+local BackpackAppearance = require(ServerScriptService.Server.BackpackService.BackpackAppearance)
 
 -- 远程事件
 local RemotesRoot      = ReplicatedStorage:WaitForChild("Remotes")
@@ -132,11 +133,9 @@ BackpackModule.onChanged(function(player, snapshot)
     if not player or not player.Parent then
         return
     end
-
     -- BackpackModule 已经保证 snapshot 是深拷贝，这里再 shallow 一层，以防后面误改
     local newState = shallowCopyState(snapshot)
     local oldState = lastStateByPlayer[player]
-
     -- 第一次看到这个玩家：直接发全量
     if not oldState then
         lastStateByPlayer[player] = newState
@@ -144,22 +143,18 @@ BackpackModule.onChanged(function(player, snapshot)
         RE_S2C_Full:FireClient(player, newState)
         return
     end
-
     local addedItems, removedIds, equipChanges = diffStates(oldState, newState)
     lastStateByPlayer[player] = newState
-
     -- 有新增物品
     if #addedItems > 0 then
         dprint("%s Backpack 新增物品 %d 个", player.Name, #addedItems)
         RE_S2C_ItemsAdded:FireClient(player, addedItems)
     end
-
     -- 有删除物品
     if #removedIds > 0 then
         dprint("%s Backpack 删除物品 %d 个", player.Name, #removedIds)
         RE_S2C_ItemsRemoved:FireClient(player, removedIds)
     end
-
     -- 槽位变化
     for _, change in ipairs(equipChanges) do
         dprint("%s Backpack 槽位变化 slot=%s index=%d old=%s new=%s",
@@ -170,8 +165,16 @@ BackpackModule.onChanged(function(player, snapshot)
             tostring(change.newId)
         )
         RE_S2C_Equipped:FireClient(player, change.slotName, change.slotIndex, change.newId, change.oldId)
+        -- 新增：驱动服务器挂/卸装备外观
+        local newItem = nil
+        if change.newId and change.newId ~= "" then
+            newItem = newState.backpack[change.newId]
+        end
+        BackpackAppearance.applyEquipChange(player, change.slotName, newItem)
     end
 end)
+
+BackpackAppearance.init() -- 根据背包渲染玩家装备初始化
 
 -- C-S：客户端请求全量同步 
 RE_CS_RequestFull.OnServerEvent:Connect(function(player)

@@ -13,6 +13,7 @@ local character: Model? = nil
 local currentCombatState: string? = nil
 local currentViewMode: string? = nil -- 前 ViewMode
 local FREE_AIM_ATTR_NAME = "FreeAim" -- 1129新：Ctrl 呼出鼠标的状态同步到角色 Attribute
+local defaultMouseIcon = UserInputService.MouseIcon -- 缓存鼠标icon。。。
 
 -- 过肩偏移参数（studs）
 local SHOULDER_RIGHT = 4.1   -- 向左右多少，右市政
@@ -173,6 +174,7 @@ RunService:BindToRenderStep(
 		-- 只有第三人称持枪时开启过肩；开镜时偏移更贴，未开镜时略微偏一点
 		local isTPArmed = (currentCombatState == PlayerViewState.CombatState.TP_Armed)
 		local isFPArmed = (currentCombatState == PlayerViewState.CombatState.FP_Armed)
+		local isFPUnarmed = (currentCombatState == PlayerViewState.CombatState.FP_Unarmed)
 		local isAiming = (char:GetAttribute("IsAiming") == true)
 
 		-- 1129：第一人称 FreeAim = 纯 UI 模式，这里不再接管 CameraType，只靠 MouseBehavior 来防止视角旋转
@@ -201,11 +203,7 @@ RunService:BindToRenderStep(
 					-- 默认：全程锁中心
 					shouldLock = true
 				end
-
-				desiredBehavior = shouldLock
-					and Enum.MouseBehavior.LockCenter
-					or Enum.MouseBehavior.Default
-
+				desiredBehavior = shouldLock and Enum.MouseBehavior.LockCenter or Enum.MouseBehavior.Default
 			elseif isFPArmed then
 				-- 第一人称持枪
 				if useFreeAimTPS then
@@ -214,6 +212,16 @@ RunService:BindToRenderStep(
 				else
 					-- 默认第一人称：锁中心
 					desiredBehavior = Enum.MouseBehavior.LockCenter
+				end
+			elseif isFPUnarmed then 
+				-- 1215新增：第一人称不持枪也支持 Ctrl FreeAim
+				if useFreeAimTPS then
+					desiredBehavior = Enum.MouseBehavior.Default
+					UserInputService.MouseIconEnabled = true
+					UserInputService.MouseIcon = defaultMouseIcon
+				else
+					desiredBehavior = Enum.MouseBehavior.LockCenter
+					UserInputService.MouseIconEnabled = false
 				end
 			end
 

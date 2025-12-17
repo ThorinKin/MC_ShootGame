@@ -22,7 +22,7 @@ local CLICK_SOUND_ATTR   = "ClickSound"    -- string：点击音效名
 local DEFAULT_HOVER_SCALE = 1.15      -- 悬浮放大
 local DEFAULT_PRESS_SCALE = 0.9      -- 悬浮放大按下
 -- 弹簧参数：
-local SPR_DAMPING   = 0.3 -- 轻微欠阻尼，会有一点回弹
+local SPR_DAMPING   = 0.5 -- 轻微欠阻尼，会有一点回弹
 local SPR_FREQUENCY = 10 -- 频率 10  响应快，弹两下就停
 
 -- 类型 & 状态
@@ -65,16 +65,20 @@ local function applySizeSpring(target: GuiObject, size: UDim2)
 	})
 end
 local function cleanup(gui: GuiObject)
-	local st = states[gui]
-	if not st then
-		return
-	end
+    local st = states[gui]
+    if not st then
+        return
+    end
 
-	for _, conn in st.conns do
-		conn:Disconnect()
-	end
+    for _, conn in st.conns do
+        conn:Disconnect()
+    end
+    -- 把这个实例上的 spring 停掉（防止内存/更新残留）
+    pcall(function()
+        Spr.stop(gui)
+    end)
 
-	states[gui] = nil
+    states[gui] = nil
 end
 
 -- 工具：状态切换：悬浮 / 按下
@@ -184,6 +188,8 @@ local function bindGui(gui: GuiObject)
 
 	table.insert(st.conns, gui.MouseLeave:Connect(function()
 		setHover(gui, false)
+		-- 关键补丁：离开时顺便把“按下状态”也取消掉，避免卡死在 pressSize
+		setPressed(gui, false)
 	end))
 
 	-- 点击事件：只有 GuiButton 处理按下/松开

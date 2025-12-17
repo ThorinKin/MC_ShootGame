@@ -1,7 +1,6 @@
 -- StarterPlayer/StarterPlayerScripts/Client/Enemy/EnemyAnimator.client.lua
 local Players   = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-
 local EnemiesFolder = Workspace:WaitForChild("Enemies")
 
 -- 工具：为一只敌人绑定本地动画逻辑
@@ -82,14 +81,18 @@ local function setupEnemy(enemy: Model)
 			end
 
 		elseif state == "Attack" then
-			-- 攻击动画：每次状态变为 Attack 就 Play 一下，播完它自己停
-			if attackTrack then
-				attackTrack:Play(0.05)
+			-- 攻击动画本身改由 AttackTick Attribute 驱动
+			-- 这里只负责停掉走路/待机，避免攻击时腿还在走路
+			if idleTrack and idleTrack.IsPlaying then
+				idleTrack:Stop(0.15)
+			end
+			if walkTrack and walkTrack.IsPlaying then
+				walkTrack:Stop(0.15)
 			end
 
 		elseif state == "Dead" then
 			stopAll(nil)
-			-- 这里能扩展死亡动画。。
+			-- 可做死亡动画-----！！
 		else
 			-- 其他未知状态：回 Idle
 			if idleTrack and not idleTrack.IsPlaying then
@@ -102,9 +105,19 @@ local function setupEnemy(enemy: Model)
 	idleTrack:Play(0.1)
 	playState(enemy:GetAttribute("State"))
 
+	-- 状态驱动（Idle / Walk / Attack / Return / Dead）
 	enemy:GetAttributeChangedSignal("State"):Connect(function()
 		playState(enemy:GetAttribute("State"))
 	end)
+
+	-- AttackTick 驱动攻击动画，每次服务器结算一次攻击就播一次
+	if attackTrack then
+		enemy:GetAttributeChangedSignal("AttackTick"):Connect(function()
+			-- 每次 AttackTick 变化，重播一次攻击动画
+			stopAll(attackTrack)
+			attackTrack:Play(0.05)
+		end)
+	end
 
 	humanoid.Died:Connect(function()
 		stopAll(nil)

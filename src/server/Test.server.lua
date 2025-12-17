@@ -35,78 +35,81 @@ local function giveStarterItems(player)
         return
     end
 
-    -- 每个部位 2 件，品质不一样，小类/名字随便起
-    -- 品质字段用 attrs.quality，跟 UI 里 QUALITY_TEMPLATE_MAP 对得上
+    -- 每个部位 2 件，品质不一样，用来测试外观映射：
+    -- Helmet_1 / Helmet_2
+    -- Armor_1 / Armor_2
+    -- AKM / M4A1
+    -- Grenade_1 / Grenade_2
     local starterItems = {
         -- Helmet：common + rare
         {
             type    = ITEM_TYPE.Helmet,
-            subType = "Training Helmet",
+            subType = "Helmet_1",
             attrs   = {
                 quality = "common",
-                name    = "Rusty Helmet",
+                name    = "Helmet_1",
             },
         },
         {
             type    = ITEM_TYPE.Helmet,
-            subType = "Combat Helmet",
+            subType = "Helmet_2",
             attrs   = {
                 quality = "rare",
-                name    = "Kevlar Helmet",
+                name    = "Helmet_2",
             },
         },
 
         -- Armor：common + epic
         {
             type    = ITEM_TYPE.Armor,
-            subType = "Training Armor",
+            subType = "Armor_1",
             attrs   = {
                 quality = "common",
-                name    = "Old Vest",
+                name    = "Armor_1",
             },
         },
         {
             type    = ITEM_TYPE.Armor,
-            subType = "Assault Armor",
+            subType = "Armor_2",
             attrs   = {
                 quality = "epic",
-                name    = "Titan Plate",
+                name    = "Armor_2",
             },
         },
 
-        -- Weapon：common + legendary
+        -- Weapon：AKM + M4A1，品质不一样
         {
             type    = ITEM_TYPE.Weapon,
-            subType = "Practice Rifle",
+            subType = "AKM",
             attrs   = {
                 quality = "common",
-                name    = "Training Rifle",
+                name    = "AKM",
             },
         },
         {
             type    = ITEM_TYPE.Weapon,
-            subType = "Battle Rifle",
+            subType = "M4A1",
             attrs   = {
                 quality = "legendary",
-                name    = "Dragon Fury",
+                name    = "M4A1",
             },
         },
 
-        -- Throwable：common + mythic
+        -- Throwable：随便两个，主要是占坑测试
         {
             type    = ITEM_TYPE.Throwable,
-            subType = "Practice Grenade",
+            subType = "Throwable_1",
             attrs   = {
                 quality = "common",
-                name    = "Dummy Grenade",
+                name    = "Grenade_1",
             },
         },
         {
             type    = ITEM_TYPE.Throwable,
-            subType = "Shock Grenade",
+            subType = "Throwable_1",
             attrs   = {
                 quality = "mythic",
-                name    = "Void Pulse",
+                name    = "Grenade_2",
             },
         },
     }

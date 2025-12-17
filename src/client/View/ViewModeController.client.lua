@@ -51,7 +51,6 @@ local function applyFirstPerson()
 	player.CameraMode = Enum.CameraMode.Classic
 	camera.CameraType = Enum.CameraType.Custom
 	camera.FieldOfView = 70
-	UIS.MouseIconEnabled = false
 	-- 锁死在 0 距离 即 第一人称
 	player.CameraMinZoomDistance = 0
 	player.CameraMaxZoomDistance = 0
