@@ -6,6 +6,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DamagePopup = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Effects"):WaitForChild("DamagePopup"))
 
+local player = Players.LocalPlayer
+
 -- 记录已经监听过的 Humanoid
 type TrackInfo = {
 	lastHealth: number,
@@ -14,7 +16,25 @@ type TrackInfo = {
 
 local tracked: { [Humanoid]: TrackInfo } = {}
 
+-------------配置-------------
 local MIN_DAMAGE = 0.5 -- 小于这个值就不跳字
+local CRIT_THRESHOLD_MULT = 1.5 -- 大于这个值算暴击
+-------------配置-------------
+
+-- 工具取枪械基础伤害
+local function getLocalEquippedBaseDamage(): number?
+	local char = player.Character
+	if not char then return nil end
+
+	-- 你项目里可能同时有别的 Tool，这里就“随便抓一个 Tool”
+	local tool = char:FindFirstChildOfClass("Tool")
+	if not tool then return nil end
+
+	local dmg = tool:GetAttribute("damage") -- 你也可以 require Constants 用 Constants.DAMAGE_ATTRIBUTE
+	dmg = tonumber(dmg)
+	if not dmg or dmg <= 0 then return nil end
+	return dmg
+end
 
 local function stopTracking(humanoid: Humanoid)
 	local info = tracked[humanoid]
@@ -46,20 +66,23 @@ local function startTracking(humanoid: Humanoid)
 		if delta == 0 then
 			return
 		end
-
 		-- 生命下降 = 伤害
 		if delta < 0 then
 			local damage = -delta
 			if damage < MIN_DAMAGE then
 				return
 			end
-
+			local base = getLocalEquippedBaseDamage()
+			local isCrit = (base ~= nil and damage >= base * CRIT_THRESHOLD_MULT)
 			-- 纯客户端特效：服务器已经算好伤害并 TakeDamage 了
-			DamagePopup.show(humanoid, damage, false)
-
+			DamagePopup.show(humanoid, damage, false, isCrit)
 		else
-			-- 生命上升 = 治疗 预留的，暂时没有
-			-- DamagePopup.show(humanoid, delta, true)
+			-- 生命上升 = 治疗
+			local heal = delta
+			if heal < MIN_DAMAGE then
+				return
+			end
+			DamagePopup.show(humanoid, heal, true) -- isHeal=true，会走绿色
 		end
 	end)
 

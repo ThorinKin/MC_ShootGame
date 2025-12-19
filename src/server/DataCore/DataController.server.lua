@@ -9,11 +9,12 @@ local DataStore2 = require(ServerScriptService:WaitForChild("DataStore2"))
 
 -- 总管所有数据库相关模块------------------------------------------
 local Modules = {
-    require(ServerScriptService.Server.EcoService.EcoModule),
-    require(ServerScriptService.Server.ExpService.ExpModule),
-    require(ServerScriptService.Server.BackpackService.BackpackModule),
-    require(ServerScriptService.Server.PetService.PetModule),
-    require(ServerScriptService.Server.AttrService.AttrModule),
+    require(ServerScriptService.Server.EcoService.EcoModule),           -- 经济
+    require(ServerScriptService.Server.ExpService.ExpModule),           -- 经验
+    require(ServerScriptService.Server.BackpackService.BackpackModule), -- 背包
+    require(ServerScriptService.Server.PetService.PetModule),           -- 宠物
+    require(ServerScriptService.Server.AttrService.AttrModule),         -- 加点属性
+    require(ServerScriptService.Server.AttrService.BaseAttrModule),     -- 基础属性
     -- ！可扩展
 }
 local SAVE_INTERVAL = 60  -- 定时 SaveAll（秒）（仅线上开）

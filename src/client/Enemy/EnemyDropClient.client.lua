@@ -36,13 +36,15 @@ local CFG = {
 	ScatterSpeedVMin = 14,  -- 竖直最小速度
 	ScatterSpeedVMax = 20,  -- 竖直最大速度
 
-	MagnetRadius     = 14,  -- 多近开始吸附
+	MagnetRadius     = 100,  -- 多近开始吸附
+	AttractSpeedMax  = 100,  -- 速度上限，防瞬移
+	SpeedRampRadius  = 30,   -- 只在离玩家 30 studs 内才加速
 	PickupRadius     = 1.6, -- 多近算拾取
 	AttractSpeedBase = 30,  -- 吸附基础速度
-	MaxLifeSeconds   = 12,  -- 掉落物最长存在时间（纯视觉）
+	MaxLifeSeconds   = 35,  -- 掉落物最长存在时间（纯视觉）
 
     SpawnUpOffset    = 2.0,   -- 生成时向上抬一点
-	MagnetDelay      = 0.20,  -- 出生后多久才开始吸附
+	MagnetDelay      = 1.5,  -- 出生后多久才开始吸附
 	PickupDelay      = 0.35,  -- 出生后多久才允许拾取
 }
 ---------------------------------------------------------
@@ -64,10 +66,6 @@ type Orb = {
 	attracting: boolean,
 }
 local orbs: { Orb } = {}
-
--- ACK：10秒一次批量上报（不真发钱）
-local ackByToken: { [string]: { coin: number, exp: number } } = {}
-local ackFlushTask = nil
 
 local function getCharRoot(): BasePart?
 	local char = localPlayer.Character
@@ -259,36 +257,29 @@ RunService.Heartbeat:Connect(function(dt)
             setDropPhysics(orb.inst, false)
             orb.root.Anchored = true
         end
-
 		if orb.attracting then
-            -- 拾取迟一下，避免秒捡只听声
-            if bornDt >= CFG.PickupDelay and dist <= CFG.PickupRadius then
-                fireHudReward(orb.kind, orb.value)
-                orb.inst:Destroy()
-                table.remove(orbs, i)
-            else
-                -- 拾取判定
-                if dist <= CFG.PickupRadius then
-                    fireHudReward(orb.kind, orb.value)
-                    orb.inst:Destroy()
-                    table.remove(orbs, i)
-                else
-                    -- 吸附移动（越近越快一点）
-                    local dir = (targetPos - p)
-                    local d   = dir.Magnitude
-                    if d > 0.001 then
-                        local speed = CFG.AttractSpeedBase + (CFG.MagnetRadius - math.min(d, CFG.MagnetRadius)) * 6
-                        local step  = math.min(d, speed * dt)
-                        local newPos = p + dir.Unit * step
-
-                        if orb.inst:IsA("Model") then
-                            (orb.inst :: Model):PivotTo(CFrame.new(newPos))
-                        else
-                            orb.root.CFrame = CFrame.new(newPos)
-                        end
-                    end
-                end
-            end
+			-- 只有满足：延迟到 + 距离够近，才拾取
+			if bornDt >= CFG.PickupDelay and dist <= CFG.PickupRadius then
+				fireHudReward(orb.kind, orb.value)
+				orb.inst:Destroy()
+				table.remove(orbs, i)
+				continue
+			end
+			-- 吸附移动（限制加速半径 + 速度上限，防瞬移）
+			local dir = (targetPos - p)
+			local d   = dir.Magnitude
+			if d > 0.001 then
+				local rampR = CFG.SpeedRampRadius
+				local ramp  = (rampR - math.min(d, rampR)) * 6
+				local speed = math.min(CFG.AttractSpeedMax, CFG.AttractSpeedBase + ramp)
+				local step  = math.min(d, speed * dt)
+				local newPos = p + dir.Unit * step
+				if orb.inst:IsA("Model") then
+					(orb.inst :: Model):PivotTo(CFrame.new(newPos))
+				else
+					orb.root.CFrame = CFrame.new(newPos)
+				end
+			end
 		end
 	end
 end)

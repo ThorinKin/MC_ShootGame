@@ -57,6 +57,8 @@ local state = {
     isHeld           = false, -- 综合状态：keyHeld or buttonHeld
     connections      = {},
     lockConn         = nil,   -- 1216新：监听 GameplayLocked 全局锁
+    holdStartTime = nil,
+    pendingReleaseHeldTime = nil, -- 点按补偿
 }
 
 -- 1216新：锁住时强制取消投掷输入（不触发 Throw）
@@ -65,6 +67,8 @@ local function forceCancelForLock(reason: string?)
 	state.keyHeld = false
 	state.buttonHeld = false
 	state.isHeld = false
+    state.holdStartTime = nil
+    state.pendingReleaseHeldTime = nil
 
 	local controller = state.activeController
 	if controller and controller.cancel then
@@ -88,6 +92,8 @@ local function onHeldStateChanged(newHeld: boolean)
 	state.isHeld = newHeld
 	local controller = state.activeController
 	if newHeld then
+        state.pendingReleaseHeldTime = nil
+        state.holdStartTime = tick() -- 记录按下时间
 		-- 第一次从没按 → 按下
 		-- 1）如果 Skill1 上有投掷物，通知服务器开始一轮使用
 		if state.hasThrowable and state.currentItemId then
@@ -97,12 +103,20 @@ local function onHeldStateChanged(newHeld: boolean)
 		if controller and controller.onSkill1Pressed then
 			controller:onSkill1Pressed()
 		end
-	else
-		-- 从按住 → 松开
-		if controller and controller.onSkill1Released then
-			controller:onSkill1Released()
-		end
-	end
+    else
+        local heldTime = 0
+        if state.holdStartTime then
+            heldTime = math.max(0, tick() - state.holdStartTime)
+        end
+        state.holdStartTime = nil
+
+        if controller and controller.onSkill1Released then
+            controller:onSkill1Released()
+            state.pendingReleaseHeldTime = nil  -- 关键：别留下脏 pending
+        else
+            state.pendingReleaseHeldTime = heldTime
+        end
+    end
 end
 
 local function recomputeHeld()
@@ -201,6 +215,20 @@ end
 -- 由 ThrowableController 调用：成为当前激活 Controller
 function ThrowableInput.setActiveController(controller)
 	state.activeController = controller
+    -- 网络延迟，点按补偿
+    if controller and state.pendingReleaseHeldTime and not isLocked() then
+        local held = state.pendingReleaseHeldTime
+        state.pendingReleaseHeldTime = nil
+        if controller.onSkill1Pressed then
+            controller:onSkill1Pressed()
+        end
+        -- 把蓄力起点往回拨，模拟真实按住 held 秒
+        controller.chargeStartTime = tick() - held
+        if controller.onSkill1Released then
+            controller:onSkill1Released()
+        end
+        return
+    end
 	-- 如果此时 Skill1 已经按着，让新 Controller 立刻收到按下事件
 	if controller and state.isHeld and not isLocked() and controller.onSkill1Pressed then
 		controller:onSkill1Pressed()

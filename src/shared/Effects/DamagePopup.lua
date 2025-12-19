@@ -1,5 +1,5 @@
--- ReplicatedStorage/Shared/Effects/DamagePopup.lua
 --!nocheck
+-- ReplicatedStorage/Shared/Effects/DamagePopup.lua
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -49,8 +49,8 @@ local function getRootPart(humanoid: Humanoid): BasePart?
 end
 
 -- 工具：给某个 humanoid 播一次跳字
--- 入参：amount: 伤害（正数），isHeal: 是否是治疗
-function DamagePopup.show(humanoid: Humanoid, amount: number, isHeal: boolean?)
+-- 入参：amount: 伤害（正数），isHeal: 是否是治疗, 是否暴击
+function DamagePopup.show(humanoid: Humanoid, amount: number, isHeal: boolean?, isCrit: boolean?)
 	if not humanoid then
 		return
 	end
@@ -104,12 +104,26 @@ function DamagePopup.show(humanoid: Humanoid, amount: number, isHeal: boolean?)
 
 	label.Text = tostring(amount)
 
-	-- 颜色：预留 --
-	-- if isHeal then
-	-- 	label.TextColor3 = Color3.fromRGB(80, 255, 80)
-	-- else
-	-- 	label.TextColor3 = Color3.fromRGB(255, 80, 80)
-	-- end
+	-- 颜色：
+	local crit = (isCrit == true)
+	if isHeal then
+		label.TextColor3 = Color3.fromRGB(80, 255, 80)
+	elseif crit then
+		label.TextColor3 = Color3.fromRGB(255, 80, 80)
+	else
+		-- 默认字体
+	end
+
+	-- 暴击机制 --
+	local popMult = POP_SCALE_MULT
+	local floatUp = FLOAT_UP_DISTANCE
+	local duration = POPUP_DURATION
+	if crit then
+		popMult = (POP_SCALE_MULT or 1.5) * 1.6   -- 更大
+		floatUp = (FLOAT_UP_DISTANCE or 2.1) * 1.15
+		duration = (POPUP_DURATION or 1.5) * 0.85 -- 更脆
+	end
+	-- 暴击机制 --
 
 	label.TextTransparency = 0
 	label.TextStrokeTransparency = 0
@@ -138,26 +152,23 @@ function DamagePopup.show(humanoid: Humanoid, amount: number, isHeal: boolean?)
 	local targetScale = BASE_SCALE * distanceFactor
 
 	-- 初始：比目标略大一点，配合 Back 缓动
-	uiScale.Scale = targetScale * POP_SCALE_MULT
+	uiScale.Scale = targetScale * popMult
 	-- 尺寸缩放逻辑结束↑
 
 	-- 往上轻轻飘一下 + 渐隐
-	local tweenInfo = TweenInfo.new(POPUP_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-	local endPos = startPos + Vector3.new(0, FLOAT_UP_DISTANCE, 0)
+	local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local endPos = startPos + Vector3.new(0, floatUp, 0)
 
-	local posTween = TweenService:Create(popupPart, tweenInfo, {
-		Position = endPos,
-	})
+	local posTween = TweenService:Create(popupPart, tweenInfo, { Position = endPos })
+
 	local textTween = TweenService:Create(label, tweenInfo, {
 		TextTransparency = 1,
 		TextStrokeTransparency = 1,
 	})
 
 	-- 尺寸 tween：从略大 → 正常
-	local scaleTweenInfo = TweenInfo.new(POPUP_DURATION, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-	local scaleTween = TweenService:Create(uiScale, scaleTweenInfo, {
-		Scale = targetScale,
-	})
+	local scaleTweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+	local scaleTween = TweenService:Create(uiScale, scaleTweenInfo, { Scale = targetScale })
 
 	posTween:Play()
 	textTween:Play()

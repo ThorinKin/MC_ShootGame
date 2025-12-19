@@ -50,8 +50,6 @@ function ThrowableController.new(tool: Tool)
     else
         warn("[ThrowableController] 初始化视模失败：", vmOrErr)
     end
-    -- 告诉输入模块：我现在是激活控制器
-    ThrowableInput.setActiveController(self)
     return self
 end
 
@@ -64,6 +62,8 @@ end
 -- 当这把投掷物 Tool 被 Humanoid 装备时调用
 function ThrowableController:onEquipped()
     local character = self.tool.Parent
+    -- 告诉输入模块：我现在是激活控制器
+    ThrowableInput.setActiveController(self)
     if character and character:IsA("Model") then
         -- 这里认为拿着雷也是战斗状态，视为 Armed
         WeaponState.setEquipped(character, true, "Throwable")
