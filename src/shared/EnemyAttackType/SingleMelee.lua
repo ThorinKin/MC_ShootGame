@@ -16,12 +16,10 @@ local function getNumberConfig(node: Instance, name: string, default: number): n
 	if child and child:IsA("IntValue") then
 		return child.Value
 	end
-
 	local attr = node:GetAttribute(name)
 	if typeof(attr) == "number" then
 		return attr :: number
 	end
-
 	return default
 end
 
@@ -33,7 +31,6 @@ function SingleMelee.init(enemy: Model, configNode: Instance)
 		cooldown   = getNumberConfig(configNode, FIELD_COOLDOWN, 1.5),  -- 冷却（秒）
 		windupTime = getNumberConfig(configNode, FIELD_WINDUP,   0.3),  -- 前摇时长（秒）
 	}
-
 	local state = {
 		enemy          = enemy,
 		config         = cfg,
@@ -41,7 +38,6 @@ function SingleMelee.init(enemy: Model, configNode: Instance)
 		windupEndTime  = nil,   -- nil = 不在前摇中，否则为前摇结束时间戳
 		targetHumanoid = nil,   -- 当前这次攻击锁定的目标
 	}
-
 	return state
 end
 

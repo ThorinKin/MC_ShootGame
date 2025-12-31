@@ -1,5 +1,5 @@
--- StarterPlayer/StarterPlayerScripts/Client/View/UpperBodyAim.client.lua
 --!nocheck
+-- StarterPlayer/StarterPlayerScripts/Client/View/UpperBodyAim.client.lua
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
 local Workspace        = game:GetService("Workspace")

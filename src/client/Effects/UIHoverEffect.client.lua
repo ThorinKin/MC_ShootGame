@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Spr = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Effects"):WaitForChild("Tween"))
 local SoundPlayer = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Effects"):WaitForChild("SoundPlayer"))
+local UserInputService = game:GetService("UserInputService")
 
 local localPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
 local playerGui = localPlayer:WaitForChild("PlayerGui")
@@ -81,6 +82,25 @@ local function cleanup(gui: GuiObject)
     states[gui] = nil
 end
 
+-- 工具：判断 gui 是否在 UIListLayout / UIGridLayout 影响的布局中
+local function isUnderLayout(gui: GuiObject): boolean
+	local p: Instance? = gui.Parent
+	while p do
+		-- 直接父级如果有 layout，且 gui 是该父级的直接孩子，最危险
+		local hasList = p:FindFirstChildWhichIsA("UIListLayout") ~= nil
+		local hasGrid = p:FindFirstChildWhichIsA("UIGridLayout") ~= nil
+		if (hasList or hasGrid) then
+			return true
+		end
+		-- 往上走，遇到 ScreenGui 就停
+		if p:IsA("ScreenGui") or p:IsA("PlayerGui") then
+			break
+		end
+		p = p.Parent
+	end
+	return false
+end
+
 -- 工具：状态切换：悬浮 / 按下
 local function setHover(gui: GuiObject, hovered: boolean)
 	local st = states[gui]
@@ -141,7 +161,6 @@ local function bindGui(gui: GuiObject)
 	if states[gui] then
 		return
 	end
-
 	-- 没开开关注解
 	if not gui:GetAttribute(HOVER_ATTR) then
 		return
@@ -170,6 +189,15 @@ local function bindGui(gui: GuiObject)
 	local pressScale = (typeof(pressScaleAttr) == "number" and pressScaleAttr > 0)
 		and pressScaleAttr
 		or DEFAULT_PRESS_SCALE
+
+	-- -- 触屏保护：在 UIListLayout/UIGridLayout 下缩放布局项本体会导致排版抖动 进而非常容易丢失点击
+	-- if UserInputService.TouchEnabled and isUnderLayout(gui) then
+	-- 	-- 如果缩放目标就是按钮本体，直接禁用缩放
+	-- 	if target == gui then
+	-- 		hoverScale = 1
+	-- 		pressScale = 1
+	-- 	end
+	-- end
 
 	local st: HoverState = {
 		target = target,

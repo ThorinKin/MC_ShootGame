@@ -11,38 +11,13 @@ local RemotesRoot      = ReplicatedStorage:WaitForChild("Remotes")
 local ThrowableRemotes = RemotesRoot:WaitForChild("Throwables")
 local RE_CS_Begin      = ThrowableRemotes:WaitForChild("[C-S]ThrowableBegin")
 
+-- PC/触屏 HUD
+local HudRegistry = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("UI"):WaitForChild("HudRegistry"))
 -- 全局锁
 local GameplayLock = require(ReplicatedStorage.Shared.ViewControl.DisableEnableLock)
 -- 工具：是否全局锁定
 local function isLocked()
 	return GameplayLock.isLocked(localPlayer.Character)
-end
-
--- Skill1 按钮路径（和 BackpackUi 一致）
-local function resolveSkillButton(): ImageButton?
-    local playerGui = localPlayer:FindFirstChildOfClass("PlayerGui")
-    if not playerGui then
-        return nil
-    end
-    local ok, HUDGui = pcall(function()
-        return playerGui:WaitForChild("HUD", 5)
-    end)
-    if not ok or not HUDGui then
-        return nil
-    end
-
-    local success, Skill1Button = pcall(function()
-        local HUD_Bottom = HUDGui:WaitForChild("Bottom")
-        local HUD_Frame = HUD_Bottom:WaitForChild("StatusBar")
-        local HUD_Player = HUD_Frame:WaitForChild("Player")
-        return HUD_Player:WaitForChild("Skill1")
-    end)
-
-    if success and Skill1Button and Skill1Button:IsA("ImageButton") then
-        return Skill1Button
-    end
-
-    return nil
 end
 
 -- 内部状态
@@ -124,6 +99,74 @@ local function recomputeHeld()
     onHeldStateChanged(newHeld)
 end
 
+-- Skill1 按钮路径
+local function resolveSkillButtonFromHud(hudGui: ScreenGui?): GuiButton?
+	if not hudGui then return nil end
+	local bottom = hudGui:FindFirstChild("Bottom")
+	local status = bottom and bottom:FindFirstChild("StatusBar")
+	local player = status and status:FindFirstChild("Player")
+	local skill1 = player and player:FindFirstChild("Skill1")
+
+	if skill1 and skill1:IsA("GuiButton") then
+		return skill1
+	end
+	return nil
+end
+local function unbindSkillButton()
+	-- 断掉旧 Skill1 的监听
+	if state.skillConns then
+		for _, c in ipairs(state.skillConns) do
+			pcall(function() c:Disconnect() end)
+		end
+	end
+	state.skillConns = {}
+	state.skillButton = nil
+	state.currentItemId = nil
+	state.hasThrowable = false
+	state.buttonHeld = false
+	recomputeHeld()
+end
+local function bindSkillButton(btn: GuiButton?)
+	unbindSkillButton()
+	state.skillButton = btn
+	if not btn then
+		return
+	end
+	-- 初始读一次 attrs
+	state.currentItemId = btn:GetAttribute("ThrowableItemId")
+	state.hasThrowable = (btn:GetAttribute("HasThrowable") == true)
+	-- attrs 变化监听
+	table.insert(state.skillConns, btn:GetAttributeChangedSignal("ThrowableItemId"):Connect(function()
+		state.currentItemId = btn:GetAttribute("ThrowableItemId")
+	end))
+	table.insert(state.skillConns, btn:GetAttributeChangedSignal("HasThrowable"):Connect(function()
+		state.hasThrowable = (btn:GetAttribute("HasThrowable") == true)
+	end))
+	-- 移动端更稳：InputBegan / InputEnded
+	table.insert(state.skillConns, btn.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch
+		or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			state.buttonHeld = true
+			recomputeHeld()
+		end
+	end))
+	table.insert(state.skillConns, btn.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch
+		or input.UserInputType == Enum.UserInputType.MouseButton1 then
+			state.buttonHeld = false
+			recomputeHeld()
+		end
+	end))
+	-- 兜底：有些手机“点一下”InputEnded 会丢，这个当补刀
+	table.insert(state.skillConns, btn.Activated:Connect(function()
+		-- 点按：模拟一次按下+松开
+		state.buttonHeld = true
+		recomputeHeld()
+		state.buttonHeld = false
+		recomputeHeld()
+	end))
+end
+
 -- 对外：给 ThrowableController 用的接口
 local ThrowableInput = {}
 
@@ -134,38 +177,17 @@ function ThrowableInput.init()
     end
     state.inited = true
     -- 解析 Skill1 按钮
-    state.skillButton = resolveSkillButton()
-    local btn = state.skillButton
-    if btn then
-        -- 初始属性读一次
-        state.currentItemId = btn:GetAttribute("ThrowableItemId")
-        local has = btn:GetAttribute("HasThrowable")
-        state.hasThrowable = (has == true)
-        -- 监听属性变化
-        table.insert(state.connections, btn:GetAttributeChangedSignal("ThrowableItemId"):Connect(function()
-            state.currentItemId = btn:GetAttribute("ThrowableItemId")
-        end))
+    state.skillConns = {}
+    -- 初始化绑定当前活跃 HUD 的 Skill1
+    local hudGui = HudRegistry.wait()
+    bindSkillButton(resolveSkillButtonFromHud(hudGui))
+    -- 运行中 HUD 切换（PC/移动切换、重生重建等）自动重绑
+    table.insert(state.connections, HudRegistry.changed():Connect(function(newHud)
+        -- 切换 HUD 时，清掉旧按住状态，避免粘住
+        forceCancelForLock("hud_switch")
+        bindSkillButton(resolveSkillButtonFromHud(newHud))
+    end))
 
-        table.insert(state.connections, btn:GetAttributeChangedSignal("HasThrowable"):Connect(function()
-            local hasNow = btn:GetAttribute("HasThrowable")
-            state.hasThrowable = (hasNow == true)
-        end))
-        -- 按钮按下 / 松开视为 Skill1 按下 / 松开
-        table.insert(state.connections, btn.MouseButton1Down:Connect(function()
-            state.buttonHeld = true
-            recomputeHeld()
-        end))
-
-        table.insert(state.connections, btn.MouseButton1Up:Connect(function()
-            state.buttonHeld = false
-            recomputeHeld()
-        end))
-
-        -- 防止按下后鼠标移出不触发 MouseButton1Up：用 InputEnded 兜底
-        table.insert(state.connections, btn.MouseLeave:Connect(function()
-            -- 如果鼠标离开时仍按着，可以自行扩展判断；先简单起见不处理
-        end))
-    end
     -- 键盘 1：对应 Skill1
     table.insert(state.connections, UserInputService.InputBegan:Connect(function(input, gp)
         if gp then

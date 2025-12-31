@@ -45,7 +45,7 @@ end
 -- 期望结构：
 -- {
 --   id    = string,
---   kind  = string, -- 宠物类型，预留，要是不分类型统一叫pet拉倒
+--   kind  = string, -- 宠物类型，指定使用哪个具体的宠物模型
 --   name  = string, -- 显示名，可为空串
 --   attrs = table,  -- 任意属性表
 -- }

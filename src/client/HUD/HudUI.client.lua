@@ -1,15 +1,16 @@
--- StarterPlayer/StarterPlayerScripts/Client/AttrUI/HudUI.client.lua
+-- StarterPlayer/StarterPlayerScripts/Client/HUD/HudUI.client.lua
 -- 总注释：HUD 显示：金币 / 等级与经验条 / 血条（本地只读显示）
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local AbbNumber = require(ReplicatedStorage.Shared.Utility.AbbNumber)
+local HudRegistry = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("UI"):WaitForChild("HudRegistry"))
 
 local localPlayer = Players.LocalPlayer
-local playerGui   = localPlayer:WaitForChild("PlayerGui")
-
-local AbbNumber = require(ReplicatedStorage.Shared.Utility.AbbNumber)
+-- 当前活跃 HUD 渲染移动端或PC端 UI
+local hudGui = HudRegistry.wait()
 
 -- HUD：金币显示
-local coinText = playerGui:WaitForChild("HUD"):WaitForChild("Left"):WaitForChild("Menu"):WaitForChild("Coin"):WaitForChild("BG"):WaitForChild("TextLabel")
+local coinText = hudGui:WaitForChild("Left"):WaitForChild("Menu"):WaitForChild("Coin"):WaitForChild("BG"):WaitForChild("TextLabel")
 -- Players 服务：leaderstats/Cash
 local leaderstats = localPlayer:WaitForChild("leaderstats")
 local cashValue   = leaderstats:WaitForChild("Cash")
@@ -21,7 +22,7 @@ local function refreshCoinText()
 end
 
 -- HUD：等级 / 经验条（StatusBar）
-local statusRoot = playerGui:WaitForChild("HUD"):WaitForChild("Bottom"):WaitForChild("StatusBar")
+local statusRoot = hudGui:WaitForChild("Bottom"):WaitForChild("StatusBar")
 local levelFrame = statusRoot:WaitForChild("Level")
 local expBar     = levelFrame:WaitForChild("ExpBar")
 local levelText  = levelFrame:WaitForChild("TextLabel")
@@ -58,44 +59,47 @@ end
 
 -- HUD：血条（StatusBar）
 local healthFrame = statusRoot:WaitForChild("Player"):WaitForChild("Health")
-local hpBar = healthFrame:WaitForChild("HpBar") -- Size.X.Scale: 0~0.7 = 0%~100%
-local hpNum1 = healthFrame:WaitForChild("Num1") -- 当前血量
-local hpNum2 = healthFrame:WaitForChild("Num2") -- 血上限
+local hpBar = healthFrame:WaitForChild("HpBar")
+local hpGrad = hpBar:WaitForChild("UIGradient") :: UIGradient -- 改用渐变
+local hpNum1 = healthFrame:WaitForChild("Num1")
+local hpNum2 = healthFrame:WaitForChild("Num2")
 local humanoidConn1, humanoidConn2
 local currentHumanoid
-
 local function disconnectHumanoid()
 	if humanoidConn1 then humanoidConn1:Disconnect() humanoidConn1 = nil end
 	if humanoidConn2 then humanoidConn2:Disconnect() humanoidConn2 = nil end
 	currentHumanoid = nil
 end
-
+-- 工具：用 UIGradient 的 Transparency 做血量遮罩 pct=0 => 全空；pct=1 => 全满
+local function setHpPercent(pct: number)
+	pct = math.clamp(tonumber(pct) or 0, 0, 1)
+	hpGrad.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0,   0), -- 左侧不透明
+		NumberSequenceKeypoint.new(pct, 0), -- 到 pct 之前都不透明
+		NumberSequenceKeypoint.new(pct, 1), -- 从 pct 开始直接透明
+		NumberSequenceKeypoint.new(1,   1), -- 右侧透明
+	})
+end
 local function refreshHealthUI()
 	if not currentHumanoid then
-		-- 没 Humanoid 的时候别瞎显示
 		hpNum1.Text = "0"
 		hpNum2.Text = "0"
-		local s = hpBar.Size
-		hpBar.Size = UDim2.new(0, s.X.Offset, s.Y.Scale, s.Y.Offset)
+		setHpPercent(0) -- 以前是改 Size，现在改渐变
 		return
 	end
-
 	local hp  = tonumber(currentHumanoid.Health) or 0
 	local max = tonumber(currentHumanoid.MaxHealth) or 0
 	if max < 0 then max = 0 end
 	if hp < 0 then hp = 0 end
 
-	-- 数字显示
 	hpNum1.Text = tostring(math.floor(hp + 0.5))
 	hpNum2.Text = tostring(math.floor(max + 0.5))
 
-	-- 血条：0~0.7 代表 0%~100%
 	local pct = 0
 	if max > 0 then
 		pct = math.clamp(hp / max, 0, 1)
 	end
-	local s = hpBar.Size
-	hpBar.Size = UDim2.new(0.7 * pct, s.X.Offset, s.Y.Scale, s.Y.Offset)
+	setHpPercent(pct) -- 不动 hpBar.Size
 end
 
 local function bindHumanoidFromCharacter(char)
@@ -148,48 +152,35 @@ local TweenService = game:GetService("TweenService")
 local SoundService = game:GetService("SoundService")
 local Debris       = game:GetService("Debris")
 
-local rewardRoot = playerGui:WaitForChild("HUD"):WaitForChild("RewardEffect")
-local plusCoin   = rewardRoot:WaitForChild("PlusCoin")
-local plusExp    = rewardRoot:WaitForChild("PlusExp")
-local plusItem   = rewardRoot:WaitForChild("PlusItem") -- 预留
+local rewardRoot = hudGui:WaitForChild("RewardEffect")
+local templates  = rewardRoot:WaitForChild("Templates")
 
-plusCoin.Visible = false
-plusExp.Visible  = false
-plusItem.Visible = false
+local tplCoin = templates:WaitForChild("PlusCoin") :: TextLabel
+local tplExp  = templates:WaitForChild("PlusExp")  :: TextLabel
+local tplItem = templates:FindFirstChild("PlusItem") :: TextLabel?
+
+tplCoin.Visible = false
+tplExp.Visible  = false
+if tplItem then tplItem.Visible = false end
 
 local soundFolder = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Sound")
-local coinSoundT  = soundFolder:WaitForChild("Coin")
-local expSoundT   = soundFolder:WaitForChild("Exp")
+local coinSoundT  = soundFolder:WaitForChild("Coin") :: Sound
+local expSoundT   = soundFolder:WaitForChild("Exp")  :: Sound
 
--- BindbleEvent：掉落物UI效果同步，防止加载顺序导致nil
+-- BindableEvent：掉落物UI效果同步，防止加载顺序导致nil
 local clientSignals = ReplicatedStorage:FindFirstChild("ClientSignals")
 if not clientSignals then
 	clientSignals = Instance.new("Folder")
 	clientSignals.Name = "ClientSignals"
 	clientSignals.Parent = ReplicatedStorage
 end
+
 local rewardBE = clientSignals:FindFirstChild("RewardEffect")
 if not rewardBE then
 	rewardBE = Instance.new("BindableEvent")
 	rewardBE.Name = "RewardEffect"
 	rewardBE.Parent = clientSignals
 end
-
--- 小型合并：短时间内不断拾取，只显示一个飘字但数值累加
-local uiAcc = {
-	coin = 0,
-	exp  = 0,
-	item = 0,
-}
-local uiSeq = { coin = 0, exp = 0, item = 0 }
-
-local startPos = {
-	coin = plusCoin.Position,
-	exp  = plusExp.Position,
-	item = plusItem.Position,
-}
-
-local activeTween = { coin = nil, exp = nil, item = nil }
 
 local function playSound(template: Sound)
 	local s = template:Clone()
@@ -198,21 +189,41 @@ local function playSound(template: Sound)
 	Debris:AddItem(s, 5)
 end
 
-local function kickLabel(kind: string, label: TextLabel, amount: number, soundT: Sound?)
-	uiSeq[kind] += 1
-	local seq = uiSeq[kind]
+-- clone 模板 -> parent -> delay 淡出 -> debris
+local layoutSeq = 0
+local function spawnReward(kind: string, amount: number)
+	local tpl: TextLabel? = nil
+	local soundT: Sound? = nil
 
-	-- 重置 & 显示
+	if kind == "coin" then
+		tpl = tplCoin
+		soundT = coinSoundT
+	elseif kind == "exp" then
+		tpl = tplExp
+		soundT = expSoundT
+	elseif kind == "item" then
+		tpl = tplItem
+	end
+
+	if not tpl then return end
+
+	local label = tpl:Clone()
 	label.Visible = true
-	label.Position = startPos[kind]
+	label.Parent = rewardRoot
+
+	-- 让 UIListLayout 排序更稳定
+	layoutSeq += 1
+	label.LayoutOrder = layoutSeq
+
+	-- 重置透明度
 	label.TextTransparency = 0
 	label.TextStrokeTransparency = 0
 
-	-- 文字
+	-- 文案
 	if kind == "coin" then
-		label.Text = "+ " .. AbbNumber.AbbreviateNumber(amount, 1) .. "Coins"
+		label.Text = "+ " .. AbbNumber.AbbreviateNumber(amount, 1) .. " Coins"
 	elseif kind == "exp" then
-		label.Text = "+ " .. AbbNumber.AbbreviateNumber(amount, 1) .. "Exp"
+		label.Text = "+ " .. AbbNumber.AbbreviateNumber(amount, 1) .. " Exp"
 	else
 		label.Text = "+ " .. tostring(amount)
 	end
@@ -222,50 +233,24 @@ local function kickLabel(kind: string, label: TextLabel, amount: number, soundT:
 		playSound(soundT)
 	end
 
-	-- 取消上一个 tween
-	local tw = activeTween[kind]
-	if tw then
-		tw:Cancel()
-	end
-
-	-- 平滑向上飘一点 + 淡出
-	local goal = {
-		Position = startPos[kind] - UDim2.new(0, 0, 0.03, 0),
-		TextTransparency = 1,
-		TextStrokeTransparency = 1,
-	}
-	local info = TweenInfo.new(0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-	local tween = TweenService:Create(label, info, goal)
-	activeTween[kind] = tween
-	tween:Play()
-
-	tween.Completed:Connect(function()
-		-- 若期间又触发了新的奖励，就别把它关了
-		if uiSeq[kind] == seq then
-			label.Visible = false
-			uiAcc[kind] = 0
+	-- 延迟淡出
+	task.delay(2, function()
+		if label and label.Parent then
+			TweenService:Create(label, TweenInfo.new(1), {
+				TextTransparency = 1,
+				TextStrokeTransparency = 1
+			}):Play()
 		end
 	end)
+
+	Debris:AddItem(label, 3)
 end
 
 -- 监听：掉落拾取触发（来自 EnemyDropClient）
 (rewardBE :: BindableEvent).Event:Connect(function(kind: string, amount: number)
-	if typeof(kind) ~= "string" then
-		return
-	end
+	if typeof(kind) ~= "string" then return end
 	amount = tonumber(amount) or 0
-	if amount <= 0 then
-		return
-	end
+	if amount <= 0 then return end
 
-	if kind == "coin" then
-		uiAcc.coin += amount
-		kickLabel("coin", plusCoin, uiAcc.coin, coinSoundT)
-	elseif kind == "exp" then
-		uiAcc.exp += amount
-		kickLabel("exp", plusExp, uiAcc.exp, expSoundT)
-	elseif kind == "item" then
-		uiAcc.item += amount
-		kickLabel("item", plusItem, uiAcc.item, nil)
-	end
+	spawnReward(kind, amount)
 end)

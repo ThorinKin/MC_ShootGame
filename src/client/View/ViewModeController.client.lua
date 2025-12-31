@@ -5,6 +5,12 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlayerViewState = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ViewControl"):WaitForChild("PlayerViewState"))
+-- 1226新：背包等 UI 打开时会挂 GameplayLocked，这里统一拦截切视角
+local GameplayLock = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ViewControl"):WaitForChild("DisableEnableLock"))
+
+-- BindableEvent：给别的地方调，等价于按 V 
+local viewControlFolder = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("View")
+local toggleViewBE = viewControlFolder:WaitForChild("ToggleViewMode")
 
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
@@ -15,18 +21,25 @@ local ViewMode = {
 	ThirdPerson = "ThirdPerson",
 }
 
+-----------------------------可调参数-----------------------------
 -- 默认第一人称
 local currentMode = ViewMode.FirstPerson
-
 -- 第三人称参数
 local THIRD_PERSON_DEFAULT_DIST = 6   -- 默认第三人称距离
 local THIRD_PERSON_MIN_DIST = 6       -- 最靠近的第三人称距离
-local THIRD_PERSON_MAX_DIST = 6.3      -- 最远的第三人称距离
+local THIRD_PERSON_MAX_DIST = 18      -- 最远的第三人称距离
 local THIRD_PERSON_HEIGHT_OFFSET = 2  -- 相机比 HRP 高一点
 local TRANSITION_TIME = 0.25          -- 切换时长
+-----------------------------可调参数-----------------------------
 
 local isTransitioning = false
 local activeTweenValue: NumberValue? = nil
+
+-- 工具：全局锁时不允许切视角
+local function isViewToggleLockedNow(): boolean
+	local char = player.Character
+	return char ~= nil and GameplayLock.isLocked(char)
+end
 
 -- 工具：给角色挂 Attribute，调试/别的系统用
 local function syncCharacterViewState(mode: string)
@@ -150,6 +163,10 @@ end
 
 -- 工具：核心切换
 local function setViewMode(mode: string)
+	-- 1226新：背包打开等 UI 锁期间禁止切视角
+	if isViewToggleLockedNow() then
+		return
+	end
 	if mode == currentMode then return end
 	if isTransitioning then return end
 	if mode == ViewMode.FirstPerson then
@@ -176,6 +193,11 @@ local function onCharacterAdded(_character: Model)
 		applyThirdPerson()
 	end
 end
+
+-- 外部触发切视角：等价于按 V
+toggleViewBE.Event:Connect(function()
+	toggleViewMode()
+end)
 
 -- 玩家加入监听
 player.CharacterAdded:Connect(onCharacterAdded)

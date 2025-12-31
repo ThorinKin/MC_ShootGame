@@ -128,8 +128,8 @@ local function calcVisualCount(amount: number): number
 	if amount <= 0 then
 		return 0
 	end
-	-- Minecraft 味道：数量随总量增长但有上限（sqrt 很稳）
-	local c = math.ceil(math.sqrt(amount))
+	-- 更规整：数量增长更慢，100 不会炸成一地碎球
+	local c = math.ceil(math.sqrt(amount) / 2) -- 100=>5
 	return math.clamp(c, 1, CFG.VisualCapPerKind)
 end
 
@@ -177,9 +177,32 @@ local function spawnOrb(template: Instance, pos: Vector3, kind: string, value: n
 	})
 end
 
--- 工具：拾取，通知 HUD
-local function fireHudReward(kind: string, value: number)
-	rewardBE:Fire(kind, value)
+-- 工具：HUD 累加器（短时间内拾取合并成一次飘字，防刷屏）
+local HUD_FLUSH_DELAY = 0.12
+local hudAcc = { coin = 0, exp = 0, item = 0 }
+local hudFlushScheduled = false
+local function queueHudReward(kind: string, value: number)
+	if typeof(kind) ~= "string" then return end
+	value = tonumber(value) or 0
+	if value <= 0 then return end
+	if hudAcc[kind] == nil then
+		-- 未知类型直接丢弃，避免爆炸
+		return
+	end
+	hudAcc[kind] += value
+	if hudFlushScheduled then
+		return
+	end
+	hudFlushScheduled = true
+	task.delay(HUD_FLUSH_DELAY, function()
+		hudFlushScheduled = false
+		for k, v in pairs(hudAcc) do
+			if v > 0 then
+				rewardBE:Fire(k, v)
+				hudAcc[k] = 0
+			end
+		end
+	end)
 end
 
 -- 服务器下发：本次击杀允许播放掉落
@@ -260,7 +283,7 @@ RunService.Heartbeat:Connect(function(dt)
 		if orb.attracting then
 			-- 只有满足：延迟到 + 距离够近，才拾取
 			if bornDt >= CFG.PickupDelay and dist <= CFG.PickupRadius then
-				fireHudReward(orb.kind, orb.value)
+				queueHudReward(orb.kind, orb.value)
 				orb.inst:Destroy()
 				table.remove(orbs, i)
 				continue

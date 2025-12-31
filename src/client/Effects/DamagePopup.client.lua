@@ -21,19 +21,36 @@ local MIN_DAMAGE = 0.5 -- 小于这个值就不跳字
 local CRIT_THRESHOLD_MULT = 1.5 -- 大于这个值算暴击
 -------------配置-------------
 
--- 工具取枪械基础伤害
-local function getLocalEquippedBaseDamage(): number?
+-- 工具：读玩家 Attack 点数（AttrServer 同步到 player.Attr.Attack）
+local function getLocalAttackPoints(): number
+	local folder = player:FindFirstChild("Attr")
+	if folder then
+		local atk = folder:FindFirstChild("Attack")
+		if atk and atk:IsA("IntValue") then
+			return atk.Value
+		end
+	end
+	return 0
+end
+-- 工具取枪械基础伤害 + 加成伤害
+local function getLocalEquippedBaseDamageWithAttack(): number?
 	local char = player.Character
 	if not char then return nil end
 
-	-- 你项目里可能同时有别的 Tool，这里就“随便抓一个 Tool”
+	-- 就随便抓一个 Tool
 	local tool = char:FindFirstChildOfClass("Tool")
 	if not tool then return nil end
 
-	local dmg = tool:GetAttribute("damage") -- 你也可以 require Constants 用 Constants.DAMAGE_ATTRIBUTE
+	local dmg = tool:GetAttribute("damage") -- 也可以用 Constants.DAMAGE_ATTRIBUTE
 	dmg = tonumber(dmg)
 	if not dmg or dmg <= 0 then return nil end
-	return dmg
+
+	-- 1226新：Attack 属性 → 基础伤害加成（1点=+1%）
+	local atkPoints = getLocalAttackPoints()
+	if atkPoints < 0 then atkPoints = 0 end
+	local mult = 1 + atkPoints * 0.01
+
+	return dmg * mult
 end
 
 local function stopTracking(humanoid: Humanoid)
@@ -72,7 +89,7 @@ local function startTracking(humanoid: Humanoid)
 			if damage < MIN_DAMAGE then
 				return
 			end
-			local base = getLocalEquippedBaseDamage()
+			local base = getLocalEquippedBaseDamageWithAttack()
 			local isCrit = (base ~= nil and damage >= base * CRIT_THRESHOLD_MULT)
 			-- 纯客户端特效：服务器已经算好伤害并 TakeDamage 了
 			DamagePopup.show(humanoid, damage, false, isCrit)

@@ -22,6 +22,9 @@ local NO_BLUR_ATTR = "NoBlur" -- 指定Main下的Frame这个属性，为真时�
 local DEFAULT_NO_BLUR_SCREENS = { -- 硬编码指定
 	Backpack = true,
 }
+-- HUD 名称扩展
+local HUD_PC_NAME = "HUD"
+local HUD_MOBILE_NAME = "HUD_Mobile"
 ---------------------------------------------------------------------------------------
 
 local Players      = game:GetService("Players")
@@ -29,6 +32,7 @@ local Lighting     = game:GetService("Lighting")
 local player    = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local MainGui   = playerGui:WaitForChild("Main", 99) -- 仅 PlayerGui/Main 下的 Frame 生效
+local UserInputService = game:GetService("UserInputService")
 
 local UIController = {}
 -- 声音播放器
@@ -65,6 +69,29 @@ end
 -- 参与隐藏/显示的集合（在 HUD 下打 Hide/ShowPos/HidePos 属性）
 local hideHud = {}            
 local originPosition = {}     -- 记录 Main 下各 Frame 的初始位置
+
+-- 工具：获取当前要生效的 HUD 根
+local function getActiveHudRoot(): ScreenGui?
+	-- 触屏优先 HUD_Mobile
+	if UserInputService.TouchEnabled then
+		local m = playerGui:FindFirstChild(HUD_MOBILE_NAME)
+		if m and m:IsA("ScreenGui") then
+			return m
+		end
+	end
+
+	local pc = playerGui:FindFirstChild(HUD_PC_NAME)
+	if pc and pc:IsA("ScreenGui") then
+		return pc
+	end
+
+	-- 兜底：有哪个用哪个
+	local any = playerGui:FindFirstChild(HUD_MOBILE_NAME) or playerGui:FindFirstChild(HUD_PC_NAME)
+	if any and any:IsA("ScreenGui") then
+		return any
+	end
+	return nil
+end
 
 -- 工具：死亡态判断（死亡但未重生时，禁止打开，避免冲突）
 local function isLocalPlayerDead(): boolean
@@ -429,8 +456,8 @@ function UIController.setup()
 		activeScreens[obj] = nil
 		closingScreens[obj] = nil
 	end)
-	-- HUD 收集
-	local hudRoot = playerGui:FindFirstChild("HUD")
+	-- 获取 HUD
+	local hudRoot = getActiveHudRoot()
 	if hudRoot then
 		hideHud = {}
 		for _, node in ipairs(hudRoot:GetChildren()) do
@@ -446,8 +473,12 @@ UIController.setup()
 playerGui.ChildAdded:Connect(function(child)
 	if child.Name == "Main" then
 		rebindMain(child)
-	elseif child.Name == "HUD" then
-		rebindHud(child)
+	elseif child.Name == HUD_PC_NAME or child.Name == HUD_MOBILE_NAME then
+		-- 只有当它就是当前要用的 HUD 时才 rebind
+		local active = getActiveHudRoot()
+		if active == child then
+			rebindHud(child)
+		end
 	end
 end)
 -- 旧 Main 被删时 等新的出现再绑定

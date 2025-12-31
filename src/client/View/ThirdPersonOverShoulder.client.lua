@@ -15,6 +15,7 @@ local currentViewMode: string? = nil -- 前 ViewMode
 local FREE_AIM_ATTR_NAME = "FreeAim" -- 1129新：Ctrl 呼出鼠标的状态同步到角色 Attribute
 local defaultMouseIcon = UserInputService.MouseIcon -- 缓存鼠标icon。。。
 
+----------------------------可调参数----------------------------
 -- 过肩偏移参数（studs）
 local SHOULDER_RIGHT = 4.1   -- 向左右多少，右市政
 local SHOULDER_UP    = 0.1   -- 向上多少
@@ -32,6 +33,10 @@ local offsetAlpha = 0
 local shoulderSide = 1
 -- 当前实际使用的横向偏移（用于平滑）
 local currentShoulderRight = SHOULDER_RIGHT
+-- TPS 开镜过肩速度从武器属性读取（单位：秒）
+local AIM_TWEEN_ATTR = "AimTweenTime"
+local DEFAULT_AIM_TWEEN_TIME = 0.15
+----------------------------------------------------------------
 
 -- 输入模式识别
 local InputMode = {
@@ -51,6 +56,18 @@ local previousCameraType: Enum.CameraType? = nil
 local lastTouchX: number? = nil
 -- 最近一次右摇杆的 X 值（[-1,1]）
 local lastStickX = 0
+
+-- 1231工具：获取工具上的开镜时间
+local function getEquippedAimTweenTime(char: Model): number
+	local tool = char:FindFirstChildOfClass("Tool")
+	if tool then
+		local v = tool:GetAttribute(AIM_TWEEN_ATTR)
+		if typeof(v) == "number" and v > 0 then
+			return v
+		end
+	end
+	return DEFAULT_AIM_TWEEN_TIME
+end
 
 -- 输入模式 & 位置信息
 UserInputService.InputBegan:Connect(function(input, processed)
@@ -239,9 +256,10 @@ RunService:BindToRenderStep(
 			end
 		end
 
-		-- 进/出过肩的平滑
+		-- 1231新：进/出过肩速度与武器 AimTweenTime 对齐
 		do
-			local t = math.clamp(dt * LERP_SPEED, 0, 1)
+			local aimTime = getEquippedAimTweenTime(char)
+			local t = math.clamp(dt / aimTime, 0, 1)
 			offsetAlpha = offsetAlpha + (targetAlpha - offsetAlpha) * t
 		end
 
@@ -288,17 +306,17 @@ RunService:BindToRenderStep(
 			local t = math.clamp(dt * SIDE_LERP_SPEED, 0, 1)
 			shoulderSide = shoulderSide + (targetSide - shoulderSide) * t
 		end
-
-		-- 平滑肩部左右偏移量
+		-- 平滑肩部左右偏移量（开镜会往中间收）
 		local targetShoulderRight = SHOULDER_RIGHT
 		if isAiming then
 			targetShoulderRight = SHOULDER_RIGHT * SHOULDER_RIGHT_AIM_MULT
 		end
+		-- 1231新：开镜收肩速度对齐 AimTweenTime（单位：秒）
 		do
-			local t = math.clamp(dt * SIDE_LERP_SPEED, 0, 1)
+			local aimTime = getEquippedAimTweenTime(char)
+			local t = math.clamp(dt / aimTime, 0, 1)
 			currentShoulderRight = currentShoulderRight + (targetShoulderRight - currentShoulderRight) * t
 		end
-
 		-- 应用偏移
 		local baseCF = cam.CFrame
 		local right = baseCF.RightVector

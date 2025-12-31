@@ -11,6 +11,8 @@ local BackpackBgSceneController = require(ReplicatedStorage:WaitForChild("Shared
 -- 1206：背包打开时临时 射击/投掷物开启全局锁
 local GameplayLock = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ViewControl"):WaitForChild("DisableEnableLock"))
 local UIController = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Effects"):WaitForChild("UIController"))
+-- 拿到当前活跃 HUD（HUD / HUD_Mobile）
+local HudRegistry = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("UI"):WaitForChild("HudRegistry"))
 
 -- UI 实例路径
 local BackpackMainFrame = playerGui:WaitForChild("Main"):WaitForChild("Backpack") -- 主 Frame
@@ -20,12 +22,6 @@ local slotButton_Helmet    = BackpackSlotsFrame:WaitForChild("Helmet")
 local slotButton_Armor     = BackpackSlotsFrame:WaitForChild("Armor")
 local slotButton_Weapon    = BackpackSlotsFrame:WaitForChild("Weapon")
 local slotButton_Throwable = BackpackSlotsFrame:WaitForChild("Throwable")
--- 技能栏：Skill1 映射投掷物
-local HUDGui       = playerGui:WaitForChild("HUD")
-local HUD_Bottom   = HUDGui:WaitForChild("Bottom")
-local HUD_Frame   = HUD_Bottom:WaitForChild("StatusBar")
-local HUD_Player   = HUD_Frame:WaitForChild("Player")
-local Skill1Button = HUD_Player:WaitForChild("Skill1")
 -- 物品栏
 local InventoryFrame         = BackpackMainFrame:WaitForChild("Inventory")
 local itemTemplatesFolder    = InventoryFrame:WaitForChild("UITemplates")
@@ -48,6 +44,26 @@ ThrowablePropsFrame.Visible = false
 local backpackSceneActive = false
 local sceneOpenDelay = 0.06 -- 稍微等 HUD 开始缩回时间
 -------------------------------------------------------------------------
+-- 技能栏：Skill1 映射投掷物
+local activeHudGui: ScreenGui? = nil
+local Skill1Button: GuiButton? = nil
+local function resolveSkill1FromHud(hudGui: ScreenGui?)
+	activeHudGui = hudGui
+	Skill1Button = nil
+	if not hudGui then
+		return
+	end
+	-- HUD / HUD_Mobile 的层级一致
+	local bottom = hudGui:FindFirstChild("Bottom")
+	local status = bottom and bottom:FindFirstChild("StatusBar")
+	local player = status and status:FindFirstChild("Player")
+	local skill1 = player and player:FindFirstChild("Skill1")
+	if skill1 and (skill1:IsA("TextButton") or skill1:IsA("ImageButton")) then
+		Skill1Button = skill1
+	end
+end
+resolveSkill1FromHud(HudRegistry.wait()) -- 初始化：等 HudVariantSwitcher 注入活跃 HUD
+
 -- 工具：死亡态判断（死亡但未重生时，禁止开背包）
 local function isLocalDeadNow(): boolean
 	local char = localPlayer.Character
@@ -143,6 +159,44 @@ local function getItemQualityStyle(item)
     local qualityKey = (type(rawQuality) == "string") and string.lower(rawQuality) or nil
     return (qualityKey and QUALITY_TEXT_STYLE[qualityKey]) or QUALITY_TEXT_STYLE.common
 end
+-- 工具：拿物品品质 common/rare/epic/legendary/mythic
+local function getItemQualityKey(item)
+    if typeof(item) ~= "table" then
+        return "common"
+    end
+    local attrs = item.attrs
+    local rawQuality
+    if typeof(attrs) == "table" then
+        rawQuality = attrs.quality or attrs.Quality or attrs.rarity or attrs.Rarity
+    end
+    local qualityKey = (type(rawQuality) == "string") and string.lower(rawQuality) or "common"
+    return qualityKey
+end
+-- 工具：Equiped 模板（装备图标）按品质开Common/Rare/Epic/Legendary/Mythic
+local EQUIP_RARITY_LABELS = { "Common", "Rare", "Epic", "Legendary", "Mythic" }
+local EQUIP_RARITY_LABEL_MAP = {
+    common     = "Common",
+    normal     = "Common",
+    rare       = "Rare",
+    epic       = "Epic",
+    legendary  = "Legendary",
+    leg        = "Legendary",
+    mysterious = "Mythic",
+    mythic     = "Mythic",
+}
+local function applyEquippedTemplateRarity(iconFrame: Instance, item)
+    if not iconFrame then return end
+    local key = getItemQualityKey(item)
+    local targetName = EQUIP_RARITY_LABEL_MAP[key] or "Common"
+    -- 只开对应的那个，其它全关
+    for _, labelName in ipairs(EQUIP_RARITY_LABELS) do
+        local node = iconFrame:FindFirstChild(labelName, true)
+        if node and node:IsA("GuiObject") then
+            node.Visible = (labelName == targetName)
+        end
+    end
+end
+
 -- 大类显示名（TypeText 用）
 local TYPE_DISPLAY_NAME = {
     helmet    = "Helmet",
@@ -487,7 +541,7 @@ local function clearSkill1UI()
 end
 -- 技能槽 UI：根据当前已装备状态刷新 Skill1 图标
 local function refreshSkill1FromEquipped()
-    if not Skill1Button then
+    if not Skill1Button or not Skill1Button.Parent then
         return
     end
     -- 先清掉旧的
@@ -509,12 +563,8 @@ local function refreshSkill1FromEquipped()
     iconFrame.Position = UDim2.fromScale(0.5, 0.5)
     iconFrame.Size = UDim2.fromScale(1, 1)
     iconFrame.Parent = Skill1Button
-    -- 根据品质给 Icon 上色
-    local style = getItemQualityStyle(item)
-    local iconImage = iconFrame:FindFirstChild("Icon", true)
-    if iconImage and iconImage:IsA("GuiObject") then
-        iconImage.BackgroundColor3 = style.color
-    end
+    -- 根据品质打开Common/Rare/Epic/Legendary/Mythic
+    applyEquippedTemplateRarity(iconFrame, item)
     -- Skill1 里这份模板只是提示，不允许点里面的按钮
     for _, descendant in ipairs(iconFrame:GetDescendants()) do
         if descendant:IsA("ImageButton") then
@@ -617,9 +667,19 @@ local function playFlyAnimation(fromGui: GuiObject, toGui: GuiObject, onComplete
     TweenSpring.target(clone, 1, 6, {
         Position = targetPos,
     })
-    -- 渐隐：只处理 Equiped 下的 Border / Icon
+    -- 渐隐 Equiped: 
     if fadeOut then
         local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        -- 1226新：Equiped Frame 本身的背景也淡出
+        if clone and clone:IsA("GuiObject") then
+            TweenService:Create(clone, tweenInfo, { BackgroundTransparency = 1 }):Play()
+        end
+        -- 1226新：Equiped 下的 UIStroke 也淡出
+        for _, ui in ipairs(clone:GetDescendants()) do
+            if ui:IsA("UIStroke") then
+                TweenService:Create(ui, tweenInfo, { Transparency = 1 }):Play()
+            end
+        end
         -- Border：只管 ImageTransparency
         local border = clone:FindFirstChild("Border", true)
         if border and (border:IsA("ImageLabel") or border:IsA("ImageButton")) then
@@ -640,7 +700,15 @@ local function playFlyAnimation(fromGui: GuiObject, toGui: GuiObject, onComplete
                 TweenService:Create(icon, tweenInfo, goals):Play()
             end
         end
+        -- 1226新：补充渐隐品质标签Common/Rare/Epic/Legendary/Mythic
+        for _, labelName in ipairs(EQUIP_RARITY_LABELS) do
+            local tag = clone:FindFirstChild(labelName, true)
+            if tag and (tag:IsA("ImageLabel") or tag:IsA("ImageButton")) then
+                TweenService:Create(tag, tweenInfo, { ImageTransparency = 1 }):Play()
+            end
+        end
     end
+
     TweenSpring.completed(clone, function()
         if clone.Parent then
             clone:Destroy()
@@ -731,13 +799,8 @@ local function createEquippedIcon(slotName: string, itemId: string, item)
     -- 拉满一点
     iconFrame.Size = UDim2.fromScale(1, 1)
     iconFrame.Parent = btn
-
-    -- 根据品质给 Equiped.Icon 上色
-    local style = getItemQualityStyle(item)
-    local iconImage = iconFrame:FindFirstChild("Icon", true)
-    if iconImage and iconImage:IsA("GuiObject") then
-        iconImage.BackgroundColor3 = style.color
-    end
+    -- 根据品质打开对应 Common/Rare/Epic/Legendary/Mythic
+    applyEquippedTemplateRarity(iconFrame, item)
     -- 把它下面所有 ImageButton 的交互都关掉（槽位只点外面的大按钮）
     for _, descendant in ipairs(iconFrame:GetDescendants()) do
         if descendant:IsA("ImageButton") then
@@ -802,6 +865,13 @@ local function renderFromSnapshot(snapshot)
     local firstItemId = pickAnyInventoryItemId()
     setPersistentFocus(firstItemId, false)
 end
+
+-- 如果允许运行中切换 HUD 自动重绑，刷一次图标
+HudRegistry.changed():Connect(function(newHud)
+    clearSkill1UI()              -- 清 icon、旧按钮 attrs
+    resolveSkill1FromHud(newHud) -- 重绑新 HUD
+    refreshSkill1FromEquipped()  -- 重新挂图标
+end)
 
 -- S-C：全量背包 / 槽位变更事件
 RE_S2C_Full.OnClientEvent:Connect(function(snapshot)

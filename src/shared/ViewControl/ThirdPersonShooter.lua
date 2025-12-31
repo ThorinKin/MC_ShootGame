@@ -1,4 +1,5 @@
 -- ReplicatedStorage/Shared/ThirdPersonShooter.lua
+-- 总注释：第三人称射击工具：PC 用鼠标点；移动端默认用屏幕中心点（准星）来瞄准
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
@@ -11,10 +12,22 @@ local ThirdPersonShooter = {}
 
 local MAX_MOUSE_DISTANCE = 1000
 
--- 从屏幕鼠标位置，打出一条 ray，找到世界坐标（导出给别的模块复用）
-function ThirdPersonShooter.getMouseWorldTarget(camera: Camera, ignoreList: {Instance}?): Vector3
+-- 1227工具：拿瞄准屏幕点
+local function getAimScreenPoint(camera: Camera): (number, number)
+	if UserInputService.TouchEnabled then
+		-- 移动端：默认准星在屏幕中心
+		local vp = camera.ViewportSize
+		return vp.X * 0.5, vp.Y * 0.5
+	end
+	-- PC：鼠标位置
 	local mousePos = UserInputService:GetMouseLocation()
-	local viewportRay = camera:ViewportPointToRay(mousePos.X, mousePos.Y)
+	return mousePos.X, mousePos.Y
+end
+
+-- 从屏幕瞄准点，打出一条 ray，找到世界坐标
+function ThirdPersonShooter.getMouseWorldTarget(camera: Camera, ignoreList: {Instance}?): Vector3
+	local x, y = getAimScreenPoint(camera)
+	local viewportRay = camera:ViewportPointToRay(x, y)
 
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
